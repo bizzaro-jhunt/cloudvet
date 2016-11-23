@@ -64,21 +64,21 @@ else
 fi
 
 n=0
-echo "Checking if we should run MySQL tests... "
+echo -n "Checking if we should run MySQL tests... "
 if [[ -z ${MYSQL:-} ]]; then
   echo "no"
 else
   echo "yes"
   n=1
 fi
-echo "Checking if we should run Redis tests... "
+echo -n "Checking if we should run Redis tests... "
 if [[ -z ${REDIS:-} ]]; then
   echo "no"
 else
   echo "yes"
   n=1
 fi
-echo "Checking if we should run RabbitMQ tests... "
+echo -n "Checking if we should run RabbitMQ tests... "
 if [[ -z ${RABBITMQ:-} ]]; then
   echo "no"
 else
@@ -99,36 +99,36 @@ if [[ ${rc} -ne 0 ]]; then
   exit 1
 fi
 
-cat >Proc <<EOF
+cat >Procfile <<EOF
 web: ./cloudvet
 EOF
 
 set -e
 cf api ${CF_API_URL}
-cf login -u ${CF_USERNAME} -p ${CF_PASSWORD}
+cf auth ${CF_USERNAME} ${CF_PASSWORD}
 cf target -o ${CF_ORG} -s ${CF_SPACE}
-cf delete cloudvet || true
+cf delete -f cloudvet || true
 cf push -b binary_buildpack -d ${CF_DOMAIN} --no-start cloudvet
 if [[ -n ${REDIS:-} ]]; then
-  cf delete-service cloudvet-redis || true
+  cf delete-service -f cloudvet-redis &>/dev/null || true
   cf create-service ${REDIS} cloudvet-redis
   cf bind-service cloudvet cloudvet-redis
 fi
 if [[ -n ${MYSQL:-} ]]; then
-  cf delete-service cloudvet-mysql || true
+  cf delete-service -f cloudvet-mysql &>/dev/null || true
   cf create-service ${MYSQL} cloudvet-mysql
   cf bind-service cloudvet cloudvet-mysql
 fi
 cf start cloudvet
 curl --fail https://cloudvet.${CF_DOMAIN}/ping
 if [[ -n ${REDIS:-} ]]; then
-  curl --fail https://cloudvet.${CF_DOMAIN}/mysql
-fi
-if [[ -n ${MYSQL:-} ]]; then
   curl --fail https://cloudvet.${CF_DOMAIN}/redis
 fi
+if [[ -n ${MYSQL:-} ]]; then
+  curl --fail https://cloudvet.${CF_DOMAIN}/mysql
+fi
 
-cf delete cloudvet
-cf delete-service cloudvet-redis || true
-cf delete-service cloudvet-mysql || true
+cf delete -f cloudvet
+cf delete-service -f cloudvet-redis &>/dev/null || true
+cf delete-service -f cloudvet-mysql &>/dev/null || true
 exit 0
