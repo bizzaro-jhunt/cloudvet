@@ -3,11 +3,18 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"math/rand"
+	"strings"
+	"time"
+
 	fmt "github.com/starkandwayne/goutils/ansi"
 	"io"
-	"net/http"
-	"strings"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 func ParseVcap(s string) ([]interface{}, error) {
 	var v interface{}
@@ -72,6 +79,10 @@ func Step(out io.Writer, s string, args ...interface{}) {
 	fmt.Fprintf(out, s+"... ", args...)
 }
 
+func Info(out io.Writer, s string, args ...interface{}) {
+	fmt.Fprintf(out, s+"\n", args...)
+}
+
 func Final(w http.ResponseWriter, b bytes.Buffer, err error) {
 	w.Header().Set("Content-type", "text/plain")
 	if err == nil {
@@ -90,4 +101,14 @@ func Final(w http.ResponseWriter, b bytes.Buffer, err error) {
 
 func OK(out io.Writer) {
 	fmt.Fprintf(out, "@G{OK}\n")
+}
+
+const randos = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+func RandomString(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = randos[rand.Intn(len(randos))]
+	}
+	return string(b)
 }

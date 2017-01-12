@@ -85,6 +85,13 @@ else
   echo "yes"
   n=1
 fi
+echo "Checking if we should run MongoDB tests... "
+if [[ -z ${MONGO:-} ]]; then
+  echo "no"
+else
+  echo "yes"
+  n=1
+fi
 
 if [[ ${n} -eq 0 ]]; then
   echo
@@ -119,6 +126,11 @@ if [[ -n ${MYSQL:-} ]]; then
   cf create-service ${MYSQL} cloudvet-mysql
   cf bind-service cloudvet cloudvet-mysql
 fi
+if [[ -n ${MONGO:-} ]]; then
+  cf delete-service cloudvet-mongo || true
+  cf create-service ${MONGO} cloudvet-mongo
+  cf bind-service cloudvet cloudvet-mongo
+fi
 cf start cloudvet
 curl --fail https://cloudvet.${CF_DOMAIN}/ping
 if [[ -n ${REDIS:-} ]]; then
@@ -127,8 +139,12 @@ fi
 if [[ -n ${MYSQL:-} ]]; then
   curl --fail https://cloudvet.${CF_DOMAIN}/redis
 fi
+if [[ -n ${MONGO:-} ]]; then
+  curl --fail https://cloudvet.${CF_DOMAIN}/mongo
+fi
 
 cf delete cloudvet
 cf delete-service cloudvet-redis || true
 cf delete-service cloudvet-mysql || true
+cf delete-service cloudvet-mongo || true
 exit 0
