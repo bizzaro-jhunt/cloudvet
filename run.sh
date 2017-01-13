@@ -1,8 +1,11 @@
 #!/bin/bash
+exec 2>&1
+if ! file cloudvet | grep -q ELF; then
+	gox -osarch linux/amd64 -output cloudvet
+fi
 
 cf_wait_for() { # {{{
 	set +e
-	local service=$1
 	while true; do
 		local space=$(cat ~/.cf/config.json | jq -r '.SpaceFields.GUID')
 		if [[ -z $space ]]; then
@@ -15,13 +18,18 @@ cf_wait_for() { # {{{
 			local state=$(cf curl /v2/service_instances/$guid | jq -r '.entity.last_operation.state')
 		fi
 		case $state in
-		(*progress) sleep 5  ;;
-		(*)         return 0 ;;
+		(*progress)
+			sleep 5
+			;;
+		(*)
+			set -e
+			return 0
+			;;
 		esac
 	done
-	set -e
 } # }}}
 
+exec 2>&1
 cat <<EOF
 
    ..:: cloudvet testing services ::..
@@ -59,6 +67,13 @@ if [[ -z ${CF_API_URL:-} ]]; then
   rc=1
 else
   echo "${CF_API_URL}"
+fi
+
+echo -n "Checking CF_SKIP_SSL... "
+if [[ -z ${CF_SKIP_SSL:-} ]]; then
+  echo "no; will verify SSL/TLS certificates"
+else
+  echo "yes; will NOT verify SSL/TLS certificates"
 fi
 
 echo -n "Checking CF_DOMAIN ... "
@@ -100,13 +115,6 @@ else
   echo "yes"
   n=1
 fi
-echo -n "Checking if we should run RabbitMQ tests... "
-if [[ -z ${RABBITMQ:-} ]]; then
-  echo "no"
-else
-  echo "yes"
-  n=1
-fi
 echo -n "Checking if we should run MongoDB tests... "
 if [[ -z ${MONGO:-} ]]; then
   echo "no"
@@ -135,51 +143,62 @@ if [[ -n ${CF_SKIP_SSL} ]]; then
 	CURLOPTS="-k"
 fi
 
-if ! file cloudvet | grep -q ELF; then
-	gox -osarch linux/amd64 -output cloudvet
-fi
-
 set -e
 cf api ${CFOPTS} ${CF_API_URL}
 cf auth ${CF_USERNAME} ${CF_PASSWORD}
 cf target -o ${CF_ORG} -s ${CF_SPACE}
-cf delete -f cloudvet || true
+cf delete -f cloudvet &>/dev/null || true
 cf push -b binary_buildpack -d ${CF_DOMAIN} --no-start -c ./cloudvet cloudvet
+echo ; echo ; echo
+
+cf delete-service -f cloudvet-redis &>/dev/null || true
+cf delete-service -f cloudvet-mysql &>/dev/null || true
+cf delete-service -f cloudvet-mongo &>/dev/null || true
+
+cf_wait_for cloudvet-redis &>/dev/null || true
+cf_wait_for cloudvet-mysql &>/dev/null || true
+cf_wait_for cloudvet-mongo &>/dev/null || true
+
 if [[ -n ${REDIS:-} ]]; then
-  cf delete-service -f cloudvet-redis || true
-  cf_wait_for cloudvet-redis &>/dev/null || true
   (set -x ; cf create-service ${REDIS} cloudvet-redis)
+fi
+if [[ -n ${MYSQL:-} ]]; then
+  (set -x ; cf create-service ${MYSQL} cloudvet-mysql)
+fi
+if [[ -n ${MONGO:-} ]]; then
+  (set -x ; cf create-service ${MONGO} cloudvet-mongo)
+fi
+
+if [[ -n ${REDIS:-} ]]; then
   cf_wait_for cloudvet-redis
   (set -x ; cf bind-service cloudvet cloudvet-redis)
 fi
 if [[ -n ${MYSQL:-} ]]; then
-  cf delete-service -f cloudvet-mysql || true
-  cf_wait_for cloudvet-mysql &>/dev/null || true
-  (set -x ; cf create-service ${MYSQL} cloudvet-mysql)
    cf_wait_for cloudvet-mysql
   (set -x ; cf bind-service cloudvet cloudvet-mysql)
 fi
 if [[ -n ${MONGO:-} ]]; then
-  cf delete-service -f cloudvet-mongo || true
-  cf_wait_for cloudvet-mongo &>/dev/null || true
-  (set -x ; cf create-service ${MONGO} cloudvet-mongo)
   cf_wait_for cloudvet-mongo
   (set -x ; cf bind-service cloudvet cloudvet-mongo)
 fi
+
+echo ; echo ; echo
 cf start cloudvet
-curl ${CURLOPTS} --fail https://cloudvet.${CF_DOMAIN}/ping
+echo ; echo ; echo
+curl -Ls ${CURLOPTS} --fail https://cloudvet.${CF_DOMAIN}/ping
 if [[ -n ${REDIS:-} ]]; then
-  curl ${CURLOPTS} --fail https://cloudvet.${CF_DOMAIN}/mysql
+  curl -Ls ${CURLOPTS} --fail https://cloudvet.${CF_DOMAIN}/redis
 fi
 if [[ -n ${MYSQL:-} ]]; then
-  curl ${CURLOPTS} --fail https://cloudvet.${CF_DOMAIN}/redis
+  curl -Ls ${CURLOPTS} --fail https://cloudvet.${CF_DOMAIN}/mysql
 fi
 if [[ -n ${MONGO:-} ]]; then
-  curl ${CURLOPTS} --fail https://cloudvet.${CF_DOMAIN}/mongo
+  curl -Ls ${CURLOPTS} --fail https://cloudvet.${CF_DOMAIN}/mongo
 fi
 
 cf delete -f cloudvet
-cf delete-service -f cloudvet-redis &> /dev/null || true
-cf delete-service -f cloudvet-mysql &> /dev/null || true
-cf delete-service -f cloudvet-mongo &> /dev/null || true
+cf delete-route -f -n cloudvet ${CF_DOMAIN} &>/dev/null || true
+cf delete-service -f cloudvet-redis &>/dev/null || true
+cf delete-service -f cloudvet-mysql &>/dev/null || true
+cf delete-service -f cloudvet-mongo &>/dev/null || true
 exit 0
